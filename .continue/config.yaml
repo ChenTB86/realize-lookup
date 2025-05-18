@@ -1,0 +1,17 @@
+# /Users/user/code/extensions/realize-lookup/.continue/config.yaml
+name: Realize-Lookup Assistant
+version: "0.0.1"
+schema: v1
+
+docs:
+  - name: backstage-api-ref
+    startUrl: https://developers.taboola.com/backstage-api/reference/
+  - name: raycast-api-ref
+    startUrl: https://developers.raycast.com/docs/api
+
+mcpServers:
+- name: shell
+    command: npx
+    args:
+      - -y
+      - continue-shell-mcp   # installs & runs the MCP shell shim

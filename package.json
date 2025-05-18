@@ -1,0 +1,70 @@
+{
+  "$schema": "https://www.raycast.com/schemas/extension.json",
+  "bundleId": "com.chen.realize.dev",
+  "name": "realize-lookup",
+  "title": "Realize Lookup Extention",
+  "description": "Raycast extension to launch and fetch data from Realize accounts",
+  "icon": "extension-icon.png",
+  "author": "chen_benattar",
+  "license": "MIT",
+  "commands": [
+    {
+      "name": "realize-get-account-data",
+      "title": "Realize Get Account Data",
+      "description": "Search an account, pick metrics & dates, show a report",
+      "mode": "view",
+      "typescript": "src/realize-get-account-data.tsx"
+    },
+    {
+      "name": "realize-account-quick-launch",
+      "title": "Realize: Account Quick Launch",
+      "description": "Open an account in Realize by numeric ID or by name lookup",
+      "mode": "view",
+      "typescript": "src/realize-account-quick-launch.tsx"
+    }
+  ],
+  "preferences": [
+    {
+      "id": "client_id",
+      "name": "client_id",
+      "title": "Backstage API Client ID",
+      "description": "Backstage API Client ID",
+      "type": "password",
+      "required": true
+    },
+    {
+      "id": "client_secret",
+      "name": "client_secret",
+      "title": "Backstage API Client Secret",
+      "description": "Backstage API Secret",
+      "type": "password",
+      "required": true
+    }
+  ],
+  "dependencies": {
+    "@raycast/api": "^1.98.2",
+    "@raycast/utils": "^1.17.0",
+    "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {
+    "@raycast/eslint-config": "^2.0.4",
+    "@types/jest": "^29.5.14",
+    "@types/node": "22.13.10",
+    "@types/react": "19.0.10",
+    "eslint": "^9.22.0",
+    "jest": "^29.7.0",
+    "node-fetch": "^3.3.2",
+    "prettier": "^3.5.3",
+    "ts-jest": "^29.3.2",
+    "typescript": "^5.8.2"
+  },
+  "scripts": {
+    "build": "ray build",
+    "dev": "ray develop",
+    "test": "jest",
+    "fix-lint": "ray lint --fix",
+    "lint": "ray lint",
+    "prepublishOnly": "echo \"\\n\\nIt seems like you are trying to publish the Raycast extension to npm.\\n\\nIf you did intend to publish it to npm, remove the \\`prepublishOnly\\` script and rerun \\`npm publish\\` again.\\nIf you wanted to publish it to the Raycast Store instead, use \\`npm run publish\\` instead.\\n\\n\" && exit 1",
+    "publish": "npx @raycast/api@latest publish"
+  }
+}
