@@ -29,19 +29,19 @@ export default function ConversionRuleList({
 
   useEffect(() => {
     console.log(`[CnvRuleList] Fetching rules for Account Slug: ${accountIdToFetch}`);
-    const toastIdPromise = showToast({ style: Toast.Style.Animated, title: "Fetching Rules..." });
+    showToast({ style: Toast.Style.Animated, title: "Fetching Rules..." });
     setIsLoading(true);
     setError(null);
 
     fetchConversionRules(accountIdToFetch)
       .then(async (fetchedRules) => {
         setAllFetchedRules(fetchedRules);
-        (await toastIdPromise).update({ style: Toast.Style.Success, title: "Rules Fetched", message: `${fetchedRules.length} total found.`});
+        showToast({ style: Toast.Style.Success, title: "Rules Fetched", message: `${fetchedRules.length} total found.` });
       })
       .catch(async (err) => {
         console.error(`[CnvRuleList] Fetch rules ERROR for ${accountIdToFetch}:`, err);
         setError(`Failed to fetch rules: ${String(err).substring(0,150)}`);
-        (await toastIdPromise).update({ style: Toast.Style.Failure, title: "Fetch Rules Failed", message: String(err).substring(0,100)});
+        showToast({ style: Toast.Style.Failure, title: "Fetch Rules Failed", message: String(err).substring(0,100) });
       })
       .finally(() => setIsLoading(false));
   }, [accountIdToFetch]);
@@ -52,15 +52,16 @@ export default function ConversionRuleList({
     const activeRules = allFetchedRules.filter(rule =>
       rule.status === "ACTIVE" &&
       rule.category &&
-      RELEVANT_CATEGORIES.includes(rule.category)
+      RELEVANT_CATEGORIES.includes(rule.category) &&
+      rule.include_in_total_conversions === true
     );
-    
-    // console.log(`[CnvRuleList] Total fetched: ${allFetchedRules.length}, Filtered: ${activeRules.length} for ${accountIdToFetch}`);
-    
+
+    console.log(`[CnvRuleList] Filtered rules with include_in_total_conversions=true for account ${accountIdToFetch} (count: ${activeRules.length}):`, activeRules);
+
     if (!isLoading && allFetchedRules.length > 0 && activeRules.length === 0) {
-        showToast(Toast.Style.Important, "No Relevant Rules", `Found ${allFetchedRules.length}, but none matched filters.`);
+        showToast({ style: Toast.Style.Failure, title: "No Relevant Rules", message: `Found ${allFetchedRules.length}, but none matched filters.` });
     }
-    
+
     if (!isLoading && allFetchedRules.length === 0 && onNoRulesFound) {
         // This means the API call itself returned zero rules (e.g. 404 or empty array from API)
         console.log(`[CnvRuleList] API returned 0 rules for ${accountIdToFetch}, calling onNoRulesFound.`);
@@ -112,10 +113,16 @@ export default function ConversionRuleList({
             accessories={[
               { text: r.total_received != null ? `Total: ${r.total_received}` : undefined, tooltip: "Total Received" },
               { date: r.last_received ? new Date(r.last_received) : undefined, tooltip: "Last Received" },
+              { text: r.advertiser_id ? `Adv: ${r.advertiser_id}` : undefined, tooltip: r.advertiser_id ? `Advertiser ID: ${r.advertiser_id}` : undefined },
               { 
                 tag: r.include_in_total_conversions ? { value: "In Total Conv.", color: Color.Green } : { value: "Not In Total", color: Color.Orange }, 
                 tooltip: `Included in Total Conversions: ${r.include_in_total_conversions ? 'Yes' : 'No'}` 
               },
+              // Highlight if total_received is 0/null or last_received is before yesterday
+              ...((r.total_received == null || r.total_received === 0 ||
+                  (r.last_received && new Date(r.last_received) < new Date(Date.now() - 24 * 60 * 60 * 1000)))
+                ? [{ tag: { value: "Stale/Inactive", color: Color.Red }, tooltip: "No recent conversions or never received." }]
+                : []),
               ...(currentPrimaryRuleId === r.id ? [{ icon: Icon.Star, tooltip: "Current Primary" }] : []),
             ]}
             actions={

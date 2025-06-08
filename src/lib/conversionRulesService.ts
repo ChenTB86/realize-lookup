@@ -11,6 +11,7 @@ interface ApiUnipConversionRule {
   type?: string;
   event_name?: string;
   include_in_total_conversions?: boolean;
+  advertiser_id?: string | number;
 }
 export interface ApiConversionRuleWrapper {
   last_received: string | null;
@@ -28,59 +29,87 @@ export interface ConversionRule {
   last_received?: string | null;
   total_received?: number | null;
   include_in_total_conversions?: boolean;
+  advertiser_id?: string | number;
   cpaGoal?: number; // Added CPA Goal
 }
 
 const PRIMARY_RULE_STORAGE_PREFIX = "primaryConversionRule_realize_";
 
+/**
+ * In-memory promise cache for fetchConversionRules to deduplicate requests per account slug.
+ */
+const ruleFetchCache: Record<string, Promise<ConversionRule[]>> = {};
+
 // fetchConversionRules remains the same as conversion_rules_service_final_may12_v3
 export async function fetchConversionRules(accountIdSlug: string): Promise<ConversionRule[]> {
-  console.log(`[CnvRuleSvc] Fetching rules for Account Slug: ${accountIdSlug}`);
-  const headers = await getAuthHeader();
-  const url = `${BASE_URL}/api/1.0/${accountIdSlug}/universal_pixel/conversion_rule/data`;
+  // Return cached promise if one is already inflight or fulfilled
+  // Only return cached promise if it is defined and not undefined/null
+  if (Object.prototype.hasOwnProperty.call(ruleFetchCache, accountIdSlug)) return ruleFetchCache[accountIdSlug];
 
-  try {
-    const response = await fetch(url, { headers });
-    if (!response.ok) {
-      if (response.status === 404) {
-        console.log(`[CnvRuleSvc] API 404 (No rules) for slug: ${accountIdSlug}`);
+  ruleFetchCache[accountIdSlug] = (async () => {
+    console.log(`[CnvRuleSvc] Fetching rules for Account Slug: ${accountIdSlug}`);
+    const headers = await getAuthHeader();
+    const url = `${BASE_URL}/api/1.0/${accountIdSlug}/universal_pixel/conversion_rule/data`;
+
+    try {
+      const response = await fetch(url, { headers });
+      if (!response.ok) {
+        if (response.status === 404) {
+          console.log(`[CnvRuleSvc] API 404 (No rules) for slug: ${accountIdSlug}`);
+          return [];
+        }
+        const errorBody = await response.text().catch(() => `HTTP ${response.status}`);
+        console.error(`[CnvRuleSvc] API error for slug ${accountIdSlug}: ${response.status} - ${errorBody}`);
+        throw new Error(`API ${response.status} fetching rules`);
+      }
+
+      const jsonResponse = await response.json();
+      let itemsToParse: ApiConversionRuleWrapper[];
+
+      function hasResultsArray(obj: unknown): obj is { results: ApiConversionRuleWrapper[] } {
+        return (
+          typeof obj === "object" &&
+          obj !== null &&
+          "results" in obj &&
+          Array.isArray((obj as { results: unknown }).results)
+        );
+      }
+
+      if (Array.isArray(jsonResponse)) {
+        itemsToParse = jsonResponse as ApiConversionRuleWrapper[];
+      } else if (hasResultsArray(jsonResponse)) {
+        itemsToParse = jsonResponse.results;
+      } else {
+        console.error(`[CnvRuleSvc] Unexpected response for slug ${accountIdSlug}. Got:`, jsonResponse);
         return [];
       }
-      const errorBody = await response.text().catch(() => `HTTP ${response.status}`);
-      console.error(`[CnvRuleSvc] API error for slug ${accountIdSlug}: ${response.status} - ${errorBody}`);
-      throw new Error(`API ${response.status} fetching rules`);
+
+      const rules: ConversionRule[] = itemsToParse.map(item => ({
+        id: String(item.unip_conversion_rule.id),
+        display_name: item.unip_conversion_rule.display_name,
+        category: item.unip_conversion_rule.category,
+        status: item.unip_conversion_rule.status,
+        rule_type: item.unip_conversion_rule.type,
+        event_name: item.unip_conversion_rule.event_name,
+        last_received: item.last_received,
+        total_received: item.total_received,
+        include_in_total_conversions: item.unip_conversion_rule.include_in_total_conversions,
+        advertiser_id: item.unip_conversion_rule.advertiser_id,
+        // cpaGoal will be loaded/saved separately or as part of the primary rule object
+      }));
+      console.log(`[CnvRuleSvc] Processed ${rules.length} rules for slug: ${accountIdSlug}. Rules:`, rules);
+      return rules;
+    } catch (error) {
+      console.error(`[CnvRuleSvc] Fetch rules general ERROR for slug ${accountIdSlug}:`, error);
+      throw error;
     }
+  })();
 
-    const jsonResponse = await response.json();
-    let itemsToParse: ApiConversionRuleWrapper[];
-
-    if (Array.isArray(jsonResponse)) {
-      itemsToParse = jsonResponse as ApiConversionRuleWrapper[];
-    } else if (jsonResponse && Array.isArray(jsonResponse.results)) {
-      itemsToParse = jsonResponse.results as ApiConversionRuleWrapper[];
-    } else {
-      console.error(`[CnvRuleSvc] Unexpected response for slug ${accountIdSlug}. Got:`, jsonResponse);
-      return [];
-    }
-
-    const rules: ConversionRule[] = itemsToParse.map(item => ({
-      id: String(item.unip_conversion_rule.id),
-      display_name: item.unip_conversion_rule.display_name,
-      category: item.unip_conversion_rule.category,
-      status: item.unip_conversion_rule.status,
-      rule_type: item.unip_conversion_rule.type,
-      event_name: item.unip_conversion_rule.event_name,
-      last_received: item.last_received,
-      total_received: item.total_received,
-      include_in_total_conversions: item.unip_conversion_rule.include_in_total_conversions,
-      // cpaGoal will be loaded/saved separately or as part of the primary rule object
-    }));
-    // console.log(`[CnvRuleSvc] Processed ${rules.length} rules for slug: ${accountIdSlug}.`); // Less verbose
-    return rules;
-  } catch (error) {
-    console.error(`[CnvRuleSvc] Fetch rules general ERROR for slug ${accountIdSlug}:`, error);
-    throw error;
-  }
+  // Ensure cache entry is cleared on error
+  return ruleFetchCache[accountIdSlug].catch(err => {
+    delete ruleFetchCache[accountIdSlug];
+    throw err;
+  });
 }
 
 

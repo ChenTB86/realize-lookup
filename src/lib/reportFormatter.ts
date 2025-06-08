@@ -5,6 +5,10 @@ const safe = (v: unknown): string => `${v ?? "–"}`.replace(/\|/g, "\\|");
 function has<K extends string>(row: ReportRow, key: K): row is ReportRow & Record<K, string | number> {
   return key in row && row[key] != null;
 }
+function getStringOrNumber(val: unknown): string | number | undefined {
+  if (typeof val === "string" || typeof val === "number") return val;
+  return undefined;
+}
 
 const LINK_ID: Record<string, string> = {
   day: "day",
@@ -54,6 +58,98 @@ export interface MarkdownConfig {
   impressionsMetricId?: string;  // e.g., "impressions"
 }
 
+/**
+ * Returns column definitions for a given breakdown and options.
+ * Used for both Markdown and XLSX export.
+ */
+export function getTableColumns(
+  breakdown: string,
+  opts: {
+    conversionCountCaption?: string;
+    cpaCaption?: string;
+    clicksMetricId?: string;
+    impressionsMetricId?: string;
+    includeClicks?: boolean;
+    includeCTR?: boolean;
+    includeUrl?: boolean;
+    includeThumbnail?: boolean;
+    accountCurrency?: string;
+  } = {}
+): { header: string; key: string; width?: number; style?: any }[] {
+  const {
+    conversionCountCaption,
+    cpaCaption,
+    clicksMetricId,
+    impressionsMetricId,
+    includeClicks,
+    includeCTR,
+    includeUrl,
+    includeThumbnail,
+    accountCurrency = "USD",
+  } = opts;
+  const currencyFmt = accountCurrency === "USD"
+    ? '"$"#,##0'
+    : accountCurrency === "EUR"
+    ? '"€"#,##0'
+    : accountCurrency === "GBP"
+    ? '"£"#,##0'
+    : '#,##0';
+  const columns: { header: string; key: string; width?: number; style?: any }[] = [];
+  const isAdBreakdown = breakdown === "item_breakdown";
+  if (isAdBreakdown) {
+    columns.push({ header: "Item ID", key: "item", width: 16 });
+    columns.push({ header: "Item Name", key: "item_name", width: 24 });
+    columns.push({ header: "Spent", key: "spent", width: 14, style: { numFmt: currencyFmt } });
+    if (includeClicks || clicksMetricId) {
+      columns.push({ header: "Clicks", key: "clicks", width: 12, style: { numFmt: "#,##0" } });
+    }
+    if (includeCTR || (clicksMetricId && impressionsMetricId)) {
+      columns.push({ header: "CTR", key: "ctr", width: 10, style: { numFmt: "0.00%" } });
+    }
+    if (includeUrl) {
+      columns.push({ header: "URL", key: "url", width: 32 });
+    }
+    if (includeThumbnail) {
+      columns.push({ header: "Thumbnail", key: "thumbnail_url", width: 32 });
+    }
+  } else if (breakdown === "campaign_breakdown") {
+    columns.push({ header: "Campaign ID", key: "campaign", width: 16 });
+    columns.push({ header: "Campaign Name", key: "campaign_name", width: 24 });
+    columns.push({ header: "Spent", key: "spent", width: 14, style: { numFmt: currencyFmt } });
+    if (includeClicks || clicksMetricId) {
+      columns.push({ header: "Clicks", key: "clicks", width: 12, style: { numFmt: "#,##0" } });
+    }
+    if (includeCTR || (clicksMetricId && impressionsMetricId)) {
+      columns.push({ header: "CTR", key: "ctr", width: 10, style: { numFmt: "0.00%" } });
+    }
+  } else if (["day", "week", "month"].includes(breakdown)) {
+    columns.push({ header: "Date", key: "date", width: 14 });
+    columns.push({ header: "Spent", key: "spent", width: 14, style: { numFmt: currencyFmt } });
+    if (includeClicks || clicksMetricId) {
+      columns.push({ header: "Clicks", key: "clicks", width: 12, style: { numFmt: "#,##0" } });
+    }
+    if (includeCTR || (clicksMetricId && impressionsMetricId)) {
+      columns.push({ header: "CTR", key: "ctr", width: 10, style: { numFmt: "0.00%" } });
+    }
+  } else {
+    columns.push({ header: PRETTY_DIMENSION[breakdown] || breakdown, key: breakdown.replace("_breakdown", "").toLowerCase(), width: 18 });
+    columns.push({ header: "Spent", key: "spent", width: 14, style: { numFmt: currencyFmt } });
+    if (includeClicks || clicksMetricId) {
+      columns.push({ header: "Clicks", key: "clicks", width: 12, style: { numFmt: "#,##0" } });
+    }
+    if (includeCTR || (clicksMetricId && impressionsMetricId)) {
+      columns.push({ header: "CTR", key: "ctr", width: 10, style: { numFmt: "0.00%" } });
+    }
+  }
+  if (conversionCountCaption) {
+    columns.push({ header: conversionCountCaption, key: "conversionCount", width: 18, style: { numFmt: "#,##0" } });
+  }
+  if (cpaCaption) {
+    columns.push({ header: cpaCaption, key: "cpa", width: 18, style: { numFmt: currencyFmt } });
+  }
+  return columns;
+}
+
 export function buildMarkdown({
   accountName,
   accountId,
@@ -74,6 +170,7 @@ export function buildMarkdown({
   markdown: string;
   guiLink: string;
 } {
+  console.log(`[ReportFormatter][DEBUG] buildMarkdown called with: conversionRuleName=${conversionRuleName}, conversionCountMetricId=${conversionCountMetricId}, conversionCountCaption=${conversionCountCaption}`);
   const currentFmtCurrency = new Intl.NumberFormat("en-US", { style: "currency", currency: accountCurrency, maximumFractionDigits: 0 });
   const currentFmtCpaNoDecimal = new Intl.NumberFormat("en-US", { style: "currency", currency: accountCurrency, maximumFractionDigits: 0 });
 
@@ -113,7 +210,7 @@ export function buildMarkdown({
   const header = `| ${headerParts.join(" | ")} |\n| ${headerLineParts.join(" | ")} |`;
 
   // Display top 10 rows in the table
-  const bodyRows = rows.slice(0, 10).map((r) => {
+  const bodyRows = rows.slice(0, 10).map((r, idx) => {
     let rowString = "| ";
     if (isAdBreakdown) {
       // Use vctr field for CTR column if present
@@ -138,14 +235,19 @@ export function buildMarkdown({
       rowString += `${r.date?.split(" ")[0] ?? "–"} | ${currentFmtCurrency.format(r.spent)} `;
     } else { // Includes "site_breakdown" and others
       const dimensionValueKey = breakdown.replace("_breakdown", "").toLowerCase(); 
-      const dimensionValue = r[dimensionValueKey] ?? (has(r, dimensionValueKey) ? r[dimensionValueKey] : "–");
+      const dimensionValueRaw = r[dimensionValueKey];
+      const dimensionValue = getStringOrNumber(dimensionValueRaw);
       rowString += `${safe(dimensionValue)} | ${currentFmtCurrency.format(r.spent)} `;
     }
 
     let conversionCountVal: number | null = null;
     let conversionWarning = "";
-    if (conversionCountMetricId && r.dynamic_metrics) {
-      const countVal = r.dynamic_metrics[conversionCountMetricId];
+    if (conversionCountMetricId) {
+      // Try dynamic_metrics first, then fallback to top-level field
+      let countVal = r.dynamic_metrics ? r.dynamic_metrics[conversionCountMetricId] : undefined;
+      if (countVal == null && Object.prototype.hasOwnProperty.call(r, conversionCountMetricId)) {
+        countVal = getStringOrNumber(r[conversionCountMetricId]);
+      }
       if (countVal != null) {
         const numericCount = Number(countVal);
         if (!isNaN(numericCount)) {
@@ -153,12 +255,17 @@ export function buildMarkdown({
         }
       } else {
         conversionWarning = "⚠️ Conversion data not available for selected rule. Please check API mapping.";
+        console.warn(`[ReportFormatter][WARN] Row ${idx}: conversionCountMetricId "${conversionCountMetricId}" missing in dynamic_metrics and top-level fields.`, r);
       }
       rowString += `| ${conversionCountVal != null ? fmtCount.format(conversionCountVal) : conversionWarning || "–"} `;
     }
 
-    if (cpaMetricId && r.dynamic_metrics) {
-      const cpaValFromMetrics = r.dynamic_metrics[cpaMetricId];
+    if (cpaMetricId) {
+      // Try dynamic_metrics first, then fallback to top-level field
+      let cpaValFromMetrics = r.dynamic_metrics ? r.dynamic_metrics[cpaMetricId] : undefined;
+      if (cpaValFromMetrics == null && Object.prototype.hasOwnProperty.call(r, cpaMetricId)) {
+        cpaValFromMetrics = getStringOrNumber(r[cpaMetricId]);
+      }
       let cpaDisplay = "–";
       let numericCpa: number | null = null;
 
@@ -191,10 +298,14 @@ export function buildMarkdown({
   let totalConversionCount = 0;
   if (conversionCountMetricId) {
     totalConversionCount = rows.reduce((sum, r) => {
-        const countVal = r.dynamic_metrics?.[conversionCountMetricId];
+        let countVal = r.dynamic_metrics?.[conversionCountMetricId];
+        if (countVal == null && Object.prototype.hasOwnProperty.call(r, conversionCountMetricId)) {
+          countVal = getStringOrNumber(r[conversionCountMetricId]);
+        }
         const numericCount = Number(countVal);
         return sum + (isNaN(numericCount) ? 0 : numericCount);
     },0);
+    console.log(`[ReportFormatter][DEBUG] totalConversionCount for metric "${conversionCountMetricId}": ${totalConversionCount}`);
   }
 
   const totalActiveWithSpent = rows.filter(r => r.spent > 0).length;
